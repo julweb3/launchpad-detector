@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Launchpad Detector</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --bg-color: #0f1124;
+      --text-color: #f5f6ff;
+      --section-bg: #161a31;
+      --section-shadow: 0 1px 4px rgba(5,7,20,0.5);
+      --section-title-color: #9aa8ff;
+      --notice-bg: rgba(255, 107, 107, 0.18);
+      --notice-text: #ffdede;
+      --setting-border: #202752;
+      --label-color: #f5f6ff;
+      --muted-text: #c7ccff;
+      --stat-card-bg: #1e2445;
+      --stat-value-color: #b3c5ff;
+      --reset-link-color: #9aa8ff;
+      --toggle-bg: #2a315d;
+      --toggle-checked-bg: #7c8cff;
+      --slider-dot-color: #ffffff;
+      --color-input-border: #2f3768;
+    }
+
+    body {
+      width: 280px;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    body.dark {
+      --bg-color: #0f1124;
+      --text-color: #f5f6ff;
+      --section-bg: #161a31;
+      --section-shadow: 0 1px 4px rgba(5,7,20,0.5);
+      --section-title-color: #9aa8ff;
+      --notice-bg: rgba(255, 107, 107, 0.18);
+      --notice-text: #ffdede;
+      --setting-border: #202752;
+      --label-color: #f5f6ff;
+      --muted-text: #c7ccff;
+      --stat-card-bg: #1e2445;
+      --stat-value-color: #b3c5ff;
+      --reset-link-color: #9aa8ff;
+      --toggle-bg: #2a315d;
+      --toggle-checked-bg: #7c8cff;
+      --slider-dot-color: #ffffff;
+      --color-input-border: #2f3768;
+    }
+
+    body.light {
+      --bg-color: #f5f7ff;
+      --text-color: #1b2045;
+      --section-bg: #ffffff;
+      --section-shadow: 0 1px 4px rgba(17,23,68,0.12);
+      --section-title-color: #3641a6;
+      --notice-bg: rgba(255, 143, 143, 0.22);
+      --notice-text: #9c1e1e;
+      --setting-border: #e1e5ff;
+      --label-color: #1b2045;
+      --muted-text: #4f5aa5;
+      --stat-card-bg: #edf0ff;
+      --stat-value-color: #3641a6;
+      --reset-link-color: #3641a6;
+      --toggle-bg: #d7dbff;
+      --toggle-checked-bg: #6573ff;
+      --slider-dot-color: #ffffff;
+      --color-input-border: #c5ccff;
+    }
+
+    .content {
+      padding: 12px 16px 20px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-left img { width: 20px; height: 20px; }
+
+    .header-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-color);
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+
+    .section {
+      background: var(--section-bg);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: var(--section-shadow);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--section-title-color);
+      font-weight: 600;
+      margin-bottom: 10px;
+      letter-spacing: 0.5px;
+    }
+
+    .domain-notice {
+      background: var(--notice-bg);
+      color: var(--notice-text);
+      font-size: 12px;
+      padding: 8px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+
+    .setting {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+
+    .setting:not(:last-child) {
+      border-bottom: 1px solid var(--setting-border);
+    }
+
+    .setting label { font-size: 13px; color: var(--label-color); cursor: pointer; }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .slider {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--toggle-bg);
+      border-radius: 20px;
+      transition: 0.3s;
+    }
+
+    .slider:before {
+      content: "";
+      position: absolute;
+      left: 3px;
+      bottom: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--slider-dot-color);
+      transition: 0.3s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    input:checked + .slider { background: var(--toggle-checked-bg); }
+    input:checked + .slider:before { transform: translateX(16px); }
+
+    .color-bar {
+      height: 3px;
+      border-radius: 2px;
+      margin-bottom: 6px;
+      background: #ff0000;
+    }
+
+    .color-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .color-picker-row span { font-size: 11px; color: var(--muted-text); }
+
+    .color-input {
+      width: 32px;
+      height: 24px;
+      border: 1px solid var(--color-input-border);
+      border-radius: 4px;
+      background: transparent;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .color-input::-webkit-color-swatch-wrapper { padding: 0; }
+    .color-input::-webkit-color-swatch { border: none; border-radius: 3px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .stat-card {
+      background: var(--stat-card-bg);
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .stat-label { font-size: 10px; color: var(--section-title-color); text-transform: uppercase; margin-bottom: 4px; }
+    .stat-value { font-size: 18px; color: var(--stat-value-color); font-weight: 700; }
+
+    .ws-status { font-size: 11px; padding: 4px 8px; border-radius: 4px; display: inline-block; font-weight: 500; }
+    .ws-status.connected { background: rgba(80, 231, 149, 0.18); color: #61f0a6; }
+    .ws-status.disconnected { background: rgba(244, 67, 54, 0.2); color: #ff8a80; }
+
+    .counts-list {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted-text);
+      line-height: 1.5;
+      white-space: pre-line;
+      max-height: 120px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .ws-status-note {
+      font-size: 12px;
+      color: var(--muted-text);
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+
+    .footer-actions { text-align: center; }
+    .reset-link { font-size: 11px; color: var(--reset-link-color); cursor: pointer; text-decoration: none; }
+    .reset-link:hover { text-decoration: underline; }
+
+    body.dark .theme-toggle img {
+      filter: invert(1) brightness(2.2);
+    }
+
+    body.light .theme-toggle img {
+      filter: none;
+    }
+
+    .permission-actions {
+      margin-top: 8px;
+      display: flex;
+      justify-content: flex-start;
+    }
+
+    .primary-button {
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      background: #6573ff;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+
+    .primary-button:hover {
+      background: #5564e6;
+    }
+  </style>
+</head>
+<body class="dark">
+  <div class="content">
+    <div class="header">
+      <div class="header-left">
+        <img id="headerIcon" src="icon.png" alt="Launchpad Detector logo">
+        <span class="header-title">Launchpad Detector</span>
+      </div>
+      <div class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <img id="themeToggleIcon" src="icon_sun.svg" alt="Toggle theme" width="16" height="16">
+      </div>
+    </div>
+
+    <div id="domainNotice" class="domain-notice" hidden>
+      Open axiom.trade to view detections.
+    </div>
+
+    <div id="permissionNotice" class="domain-notice" hidden>
+      <div id="permissionMessage">This extension needs access to axiom.trade to tag launchpad tokens.</div>
+      <div class="permission-actions">
+        <button id="enableAxiomAccess" class="primary-button">Enable axiom.trade</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Detections</div>
+      <div class="setting">
+        <label>Uxento</label>
+        <label class="toggle">
+          <input type="checkbox" id="uxentoToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="color-bar" id="uxentoColorBar"></div>
+      <div class="color-picker-row">
+        <span>Uxento color</span>
+        <input type="color" id="uxentoColor" class="color-input" value="#ff0000">
+      </div>
+      <div class="setting" style="margin-top:12px;">
+        <label>RapidLaunch</label>
+        <label class="toggle">
+          <input type="checkbox" id="rapidToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="color-bar" id="rapidColorBar"></div>
+      <div class="color-picker-row">
+        <span>RapidLaunch color</span>
+        <input type="color" id="rapidColor" class="color-input" value="#1e88e5">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Settings</div>
+      <div class="setting">
+        <label for="notificationToggle">Notifications</label>
+        <label class="toggle">
+          <input type="checkbox" id="notificationToggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section statistics">
+      <div class="section-title">Statistics</div>
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-label">Detected</div>
+          <div class="stat-value" id="tokensDetected">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Status</div>
+          <div id="wsStatusContainer">
+            <span class="ws-status disconnected" id="wsStatus">Offline</span>
+          </div>
+        </div>
+      </div>
+      <div class="counts-list" id="launchpadCounts">No launchpad data yet.</div>
+      <div class="ws-status-note" id="wsStatusNote" hidden></div>
+    </div>
+
+    <div class="footer-actions">
+      <span id="resetDefaults" class="reset-link">Reset defaults</span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

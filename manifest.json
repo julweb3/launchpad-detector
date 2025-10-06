@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Launchpad Detector",
+  "version": "1.0",
+  "description": "Detects Solana tokens launched through a launchpad",
+  "permissions": [
+    "activeTab",
+    "notifications",
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "*://axiom.trade/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    },
+    "default_title": "Launchpad Detector"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
