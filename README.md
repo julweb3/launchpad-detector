@@ -85,6 +85,7 @@ Only pumpfun program is currently supported, if this gets some traction I'll add
 The token detector only activates when the axiom.trade/pulse tab is openend
 
 ## Troubleshooting
+If you get a `manifest file is missing` error just reload the extension page
 
 If the extension isn’t working as expected:
 
