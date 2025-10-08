@@ -1,8 +1,8 @@
 #  <img width="32" height="32" alt="logo" src="https://github.com/user-attachments/assets/dc66e70d-412f-4f06-a715-02598d98cb59" /> Launchpad Detector
 
 
-**Monitor Solana launchpad tokens in real time.**
-Automatically detects new tokens from platforms like **Uxento** and **Rapidlaunch**, highlighting them directly on [Axiom Pulse](https://axiom.trade/pulse).
+**Monitor Solana and BNB launchpad tokens in real time.**
+Automatically detects new tokens from platforms like **Uxento** and **Rapidlaunch**, highlighting them directly on [Axiom Pulse](https://axiom.trade/pulse) or [GMGN Trenches](https://gmgn.ai/?chain=bsc).
 
 <img width="806" height="560" alt="header" src="https://github.com/user-attachments/assets/6160a1a1-a950-4da4-bf99-6f22768e6e0f" />
 
@@ -45,8 +45,8 @@ Once approved, you’ll be able to install it directly with one click.
 
 ## Features
 
-- 🔍 Real-time monitoring of newly launched Solana tokens for **Uxento** and **Rapidlaunch**  
-- 🏷️ Automatically tags launchpad tokens in **Axiom Pulse** with `[UXENTO]` or `[RAPIDLAUNCH]` badges   
+- 🔍 Real-time monitoring of newly launched Solana or BNB tokens for **Uxento** and **Rapidlaunch**  
+- 🏷️ Automatically tags launchpad tokens in **Axiom Pulse** **GMGN Trenches** with `[UXENTO]` or `[RAPIDLAUNCH]` badges   
 - 🔔 Browser notifications for new token launches  
 
 ---
@@ -74,7 +74,7 @@ The review process is currently pending once approved, you’ll be able to insta
 
 ## Usage
 
-1. Navigate to [https://axiom.trade/pulse](https://axiom.trade/pulse)  
+1. Navigate to [https://axiom.trade/pulse](https://axiom.trade/pulse) 
 2. When prompted, click **Allow** this only enables the display of token badges.  
    > No additional scripts or external code are injected into the page.
 
