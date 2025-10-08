@@ -4,7 +4,13 @@
   }
   window.__launchpadDetectorInjected = true;
 
-  const TOKEN_ROOT_CLASSES = [
+  // Detect which site we're on
+  const hostname = window.location.hostname;
+  const isAxiom = hostname.includes('axiom.trade');
+  const isGmgn = hostname.includes('gmgn.ai');
+
+  // Axiom token container classes
+  const AXIOM_ROOT_CLASSES = [
     'flex',
     'flex-row',
     'w-full',
@@ -18,7 +24,7 @@
     'items-center'
   ];
 
-  const TOKEN_NAME_CLASSES = [
+  const AXIOM_NAME_CLASSES = [
     'text-textPrimary',
     'text-[16px]',
     'font-medium',
@@ -26,14 +32,42 @@
     'truncate'
   ];
 
+  // GMGN token container classes (stable across different screen sizes)
+  const GMGN_ROOT_CLASSES = [
+    'relative',
+    'flex',
+    'overflow-hidden',
+    'cursor-pointer'
+  ];
+
+  const GMGN_NAME_PARENT_CLASSES = [
+    'flex',
+    'items-center',
+    'min-w-0',
+    'overflow-hidden',
+    'text-base',
+    'gap-x-4px',
+    'whitespace-nowrap',
+    'leading-[20px]',
+    'h-[20px]'
+  ];
+
+  const GMGN_NAME_CLASSES = [
+    'whitespace-nowrap',
+    'font-medium',
+    'text-[16px]',
+    'overflow-hidden',
+    'text-ellipsis',
+    'flex-shrink-0'
+  ];
+
   const seenMints = new Set();
   const mintConfigs = new Map();
-  const mintTimers = new Map();
 
-  const REAPPLY_DELAY_MS = 100;
-  const SCROLL_REAPPLY_DEBOUNCE_MS = 120;
-  let reapplyTimer = null;
-  window.__launchpadLastScrollAt = window.__launchpadLastScrollAt || 0;
+  const SCAN_DEBOUNCE_MS = 300;
+  const SCROLL_DEBOUNCE_MS = 300;
+  let scanTimer = null;
+  let reobserveCallback = null;
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== 'TOKEN_DETECTED' || !message.token) {
@@ -45,88 +79,106 @@
       return;
     }
 
-    scheduleBadge(mint, {
+    mintConfigs.set(mint, {
       label: label || '[TOKEN]',
       color: color || '#ff0000'
     });
+
+    requestScan();
   });
 
   requestInitialTokens();
   hookScrollAndVisibility();
+  setupIntersectionObserver();
 
-  function scheduleBadge(mint, config, attempt = 0) {
-    mintConfigs.set(mint, config);
-    clearPendingTimer(mint);
-    if (applyBadge(mint, config)) {
-      clearPendingTimer(mint);
+  function scanAndApplyBadges() {
+    if (!mintConfigs.size) {
       return;
     }
-    if (attempt >= 10) {
-      console.debug(`launchpad detector: unable to locate ${mint} on page.`);
-      clearPendingTimer(mint);
+
+    let containers = [];
+    let rootClasses = [];
+    let selector = '';
+
+    if (isAxiom) {
+      selector = 'div.flex.flex-row.w-full';
+      containers = document.querySelectorAll(selector);
+      rootClasses = AXIOM_ROOT_CLASSES;
+    } else if (isGmgn) {
+      selector = 'div[href*="/token/"]';
+      containers = document.querySelectorAll(selector);
+      rootClasses = GMGN_ROOT_CLASSES;
+    } else {
       return;
     }
-    const timeoutId = setTimeout(() => {
-      mintTimers.delete(mint);
-      scheduleBadge(mint, config, attempt + 1);
-    }, 350);
-    mintTimers.set(mint, timeoutId);
-  }
 
-  function applyBadge(mint, config) {
-    const roots = findRootsForMint(mint);
-    if (!roots.length) {
-      return false;
-    }
+    containers.forEach((container) => {
+      // For Axiom, check classes. For GMGN, skip class check (href selector is enough)
+      if (isAxiom && !hasAllClasses(container, rootClasses)) {
+        return;
+      }
 
-    roots.forEach((root) => decorateRoot(root, mint, config));
-    return true;
-  }
+      const mint = extractMintFromContainer(container);
 
-  function findRootsForMint(mint) {
-    const roots = new Set();
-    const escapedMint = escapeForSelector(mint);
-    const selectors = [
-      `a[href*="${escapedMint}"]`,
-      `[data-mint*="${escapedMint}"]`,
-      `[data-token*="${escapedMint}"]`,
-      `[data-address*="${escapedMint}"]`,
-      `[data-url*="${escapedMint}"]`,
-      `[src*="${escapedMint}"]`
-    ];
-
-    selectors.forEach((selector) => {
-      try {
-        document.querySelectorAll(selector).forEach((node) => {
-          const root = findTokenRoot(node);
-          if (root) {
-            roots.add(root);
-          }
-        });
-      } catch (err) {
-        // ignore selector errors
+      if (mint && mintConfigs.has(mint)) {
+        const config = mintConfigs.get(mint);
+        decorateRoot(container, mint, config);
       }
     });
-
-    if (!roots.size) {
-      document.querySelectorAll('div.flex.flex-row.w-full').forEach((candidate) => {
-        if (hasAllClasses(candidate, TOKEN_ROOT_CLASSES) && candidate.innerHTML.includes(mint)) {
-          roots.add(candidate);
-        }
-      });
-    }
-
-    return Array.from(roots);
   }
 
-  function findTokenRoot(node) {
-    let current = node instanceof HTMLElement ? node : node.parentElement;
-    while (current && current !== document.body) {
-      if (current instanceof HTMLElement && hasAllClasses(current, TOKEN_ROOT_CLASSES)) {
-        return current;
+  function extractMintFromContainer(container) {
+    // Check if container itself has href attribute (GMGN uses divs with href)
+    if (container.hasAttribute('href')) {
+      const href = container.getAttribute('href');
+      const mint = extractMintFromHref(href);
+      if (mint) {
+        return mint;
       }
-      current = current.parentElement;
     }
+
+    // Check links inside container (Axiom case)
+    const links = container.querySelectorAll('a[href]');
+    for (const link of links) {
+      const href = link.getAttribute('href') || '';
+      const mint = extractMintFromHref(href);
+      if (mint) {
+        return mint;
+      }
+    }
+
+    // Check data attributes
+    const dataElements = container.querySelectorAll('[data-mint], [data-address], [data-token]');
+    for (const el of dataElements) {
+      const mint = el.getAttribute('data-mint')
+                || el.getAttribute('data-address')
+                || el.getAttribute('data-token');
+      if (mint && mint.length >= 32) {
+        return mint;
+      }
+    }
+
+    return null;
+  }
+
+  function extractMintFromHref(href) {
+    if (!href) return null;
+
+    // Common patterns: /token/ADDRESS (any chain), ?address=ADDRESS, /ADDRESS
+    const patterns = [
+      /\/token\/([a-zA-Z0-9]{32,})/,          // /token/ADDRESS (matches /sol/token/, /bsc/token/, /eth/token/, etc.)
+      /[?&]address=([a-zA-Z0-9]{32,})/,       // ?address=ADDRESS
+      /[?&]mint=([a-zA-Z0-9]{32,})/,          // ?mint=ADDRESS
+      /\/([a-zA-Z0-9]{32,})$/                 // /ADDRESS (at end)
+    ];
+
+    for (const pattern of patterns) {
+      const match = href.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
     return null;
   }
 
@@ -135,89 +187,144 @@
   }
 
   function decorateRoot(root, mint, config) {
-    const nameSpan = findNameSpan(root);
-    if (!nameSpan) {
+    const nameElement = findNameSpan(root);
+    if (!nameElement) {
       return;
     }
 
     let badge = root.querySelector('.launchpad-detector-label');
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'launchpad-detector-label';
-      badge.style.fontWeight = '600';
-      badge.style.display = 'inline';
-      badge.style.verticalAlign = 'baseline';
-      nameSpan.insertAdjacentElement('afterend', badge);
+
+    if (isAxiom) {
+      // Axiom: insert badge after the name span
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'launchpad-detector-label';
+        badge.style.fontWeight = '600';
+        badge.style.display = 'inline';
+        badge.style.verticalAlign = 'baseline';
+        badge.style.marginLeft = '4px';
+        nameElement.insertAdjacentElement('afterend', badge);
+        badge.textContent = config.label;
+        badge.style.background = 'transparent';
+        badge.style.color = config.color;
+      } else if (badge.textContent !== config.label || badge.style.color !== config.color) {
+        // Only update if changed
+        badge.textContent = config.label;
+        badge.style.color = config.color;
+      }
+    } else if (isGmgn) {
+      // GMGN: insert badge div into the parent flex container after the first child (token name)
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'launchpad-detector-label whitespace-nowrap font-medium text-[16px] flex-shrink-0';
+        // Insert after the first child (token name div)
+        if (nameElement.children.length > 0) {
+          nameElement.insertBefore(badge, nameElement.children[1]);
+        } else {
+          nameElement.appendChild(badge);
+        }
+        badge.textContent = config.label;
+        badge.style.color = config.color;
+      } else if (badge.textContent !== config.label || badge.style.color !== config.color) {
+        // Only update if changed
+        badge.textContent = config.label;
+        badge.style.color = config.color;
+      }
     }
-
-    badge.textContent = config.label;
-    badge.style.background = 'transparent';
-    badge.style.color = config.color;
-
-    clearPendingTimer(mint);
 
     if (!seenMints.has(mint)) {
       seenMints.add(mint);
-      root.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }
 
   function findNameSpan(root) {
-    const spans = root.querySelectorAll('span');
-    for (const span of spans) {
-      if (hasAllClasses(span, TOKEN_NAME_CLASSES)) {
-        return span;
+    if (isAxiom) {
+      const spans = root.querySelectorAll('span');
+      for (const span of spans) {
+        if (hasAllClasses(span, AXIOM_NAME_CLASSES)) {
+          return span;
+        }
       }
+      return null;
+    } else if (isGmgn) {
+      // For GMGN, find the parent flex container that holds the token name
+      const divs = root.querySelectorAll('div');
+      for (const div of divs) {
+        if (hasAllClasses(div, GMGN_NAME_PARENT_CLASSES)) {
+          return div;
+        }
+      }
+      return null;
     }
-    return root.querySelector('span.text-textPrimary') || spans[0] || null;
+    return null;
   }
 
-  function escapeForSelector(value) {
-    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-      return CSS.escape(value);
-    }
-    return String(value).replace(/["\\]/g, '\\$&');
-  }
-
-  function clearPendingTimer(mint) {
-    const timerId = mintTimers.get(mint);
-    if (timerId) {
-      clearTimeout(timerId);
-      mintTimers.delete(mint);
-    }
-  }
-
-  function requestReapply(immediate = false) {
-    if (!mintConfigs.size) {
-      return;
-    }
+  function requestScan(immediate = false) {
     if (immediate) {
-      if (reapplyTimer) {
-        clearTimeout(reapplyTimer);
-        reapplyTimer = null;
+      if (scanTimer) {
+        clearTimeout(scanTimer);
+        scanTimer = null;
       }
-      mintConfigs.forEach((config, mint) => {
-        scheduleBadge(mint, config);
-      });
+      scanAndApplyBadges();
       return;
     }
-    if (reapplyTimer) {
+
+    if (scanTimer) {
       return;
     }
-    reapplyTimer = setTimeout(() => {
-      reapplyTimer = null;
-      mintConfigs.forEach((config, mint) => {
-        scheduleBadge(mint, config);
-      });
-    }, REAPPLY_DELAY_MS);
+
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      scanAndApplyBadges();
+    }, SCAN_DEBOUNCE_MS);
   }
 
+  let mutationDebounceTimer = null;
   const observer = new MutationObserver((mutations) => {
+    let foundNewContainer = false;
+
     for (const mutation of mutations) {
-      if (mutation.type === 'childList' && (mutation.addedNodes.length || mutation.removedNodes.length)) {
-        requestReapply();
-        break;
+      if (mutation.type === 'childList' && mutation.addedNodes.length) {
+        // Check if any added nodes are containers or contain containers
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // Check if the node itself is a token container
+            let isContainer = false;
+            if (isAxiom) {
+              isContainer = hasAllClasses(node, AXIOM_ROOT_CLASSES);
+            } else if (isGmgn) {
+              isContainer = node.hasAttribute && node.hasAttribute('href') &&
+                           node.getAttribute('href').includes('/token/');
+            }
+
+            if (isContainer) {
+              foundNewContainer = true;
+              break;
+            }
+
+            // Check if the node contains containers
+            const selector = isAxiom ? 'div.flex.flex-row.w-full' : 'div[href*="/token/"]';
+            const childContainers = node.querySelectorAll ? node.querySelectorAll(selector) : [];
+            if (childContainers.length > 0) {
+              foundNewContainer = true;
+              break;
+            }
+          }
+        }
+        if (foundNewContainer) break;
       }
+    }
+
+    if (foundNewContainer) {
+      // Debounce mutations to avoid excessive scans
+      if (mutationDebounceTimer) {
+        clearTimeout(mutationDebounceTimer);
+      }
+
+      mutationDebounceTimer = setTimeout(() => {
+        requestScan(true);
+        if (reobserveCallback) reobserveCallback();
+      }, 100);
     }
   });
 
@@ -231,9 +338,6 @@
       chrome.runtime.sendMessage({ type: 'REQUEST_TOKENS' }, (response) => {
         const err = chrome.runtime.lastError;
         if (err) {
-          if (!/Receiving end does not exist/i.test(err.message || '')) {
-            console.debug('Initial token request failed:', err.message);
-          }
           return;
         }
         if (!response || !Array.isArray(response.tokens)) {
@@ -243,45 +347,94 @@
           if (!token || !token.mint) {
             return;
           }
-          scheduleBadge(token.mint, {
+          mintConfigs.set(token.mint, {
             label: token.label || '[TOKEN]',
             color: token.color || '#ff0000'
           });
         });
+        requestScan(true);
       });
     } catch (err) {
-      console.debug('Initial token request threw error:', err);
+      // ignore
     }
   }
 
   function hookScrollAndVisibility() {
-    const rebroadcast = () => {
-      const configEntries = Array.from(mintConfigs.entries());
-      configEntries.forEach(([mint, cfg]) => {
-        scheduleBadge(mint, cfg);
-      });
-    };
-
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        rebroadcast();
+        requestScan(true);
       }
     });
 
-    window.addEventListener('focus', rebroadcast);
-    window.addEventListener('pageshow', rebroadcast);
+    window.addEventListener('focus', () => {
+      requestScan(true);
+    });
 
+    window.addEventListener('pageshow', () => {
+      requestScan(true);
+    });
+
+    let scrollTimer = null;
     const onScroll = () => {
-      const now = Date.now();
-      if (now - window.__launchpadLastScrollAt < SCROLL_REAPPLY_DEBOUNCE_MS) {
-        return;
+      // Clear existing timer
+      if (scrollTimer) {
+        clearTimeout(scrollTimer);
       }
-      window.__launchpadLastScrollAt = now;
-      mintConfigs.forEach((cfg, mint) => {
-        scheduleBadge(mint, cfg);
-      });
+
+      // Debounce scroll scans
+      scrollTimer = setTimeout(() => {
+        requestScan();
+      }, SCROLL_DEBOUNCE_MS);
     };
 
     window.addEventListener('scroll', onScroll, true);
+  }
+
+  function setupIntersectionObserver() {
+    const selector = isAxiom ? 'div.flex.flex-row.w-full' : 'div[href*="/token/"]';
+    const observedContainers = new WeakSet();
+
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      let needsScan = false;
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const container = entry.target;
+          const hasBadge = container.querySelector('.launchpad-detector-label');
+          if (!hasBadge && mintConfigs.size > 0) {
+            needsScan = true;
+          }
+        }
+      });
+
+      if (needsScan) {
+        requestScan(true);
+      }
+    }, {
+      root: null,
+      threshold: 0.1
+    });
+
+    const observeContainers = () => {
+      const containers = document.querySelectorAll(selector);
+
+      containers.forEach(container => {
+        if (!observedContainers.has(container)) {
+          intersectionObserver.observe(container);
+          observedContainers.add(container);
+        }
+      });
+    };
+
+    // Initial observe after page loads
+    setTimeout(observeContainers, 1000);
+
+    let reobserveTimer = null;
+    reobserveCallback = () => {
+      if (reobserveTimer) return;
+      reobserveTimer = setTimeout(() => {
+        reobserveTimer = null;
+        observeContainers();
+      }, 1000);
+    };
   }
 })();

@@ -13,22 +13,15 @@ const wsStatusNote = document.getElementById('wsStatusNote');
 const launchpadCountsList = document.getElementById('launchpadCounts');
 const resetDefaultsLink = document.getElementById('resetDefaults');
 const domainNotice = document.getElementById('domainNotice');
-const permissionNotice = document.getElementById('permissionNotice');
-const permissionMessage = document.getElementById('permissionMessage');
-const enableAxiomButton = document.getElementById('enableAxiomAccess');
 const themeToggle = document.getElementById('themeToggle');
 const themeToggleIcon = document.getElementById('themeToggleIcon');
 const pageBody = document.body;
 
 let currentDarkMode = true;
-let hasAxiomPermission = false;
 
 function safeSendMessage(message, callback) {
   chrome.runtime.sendMessage(message, (response) => {
     const error = chrome.runtime.lastError || null;
-    if (error) {
-      console.debug('Message error:', error.message);
-    }
     if (typeof callback === 'function') {
       callback(response, error);
     }
@@ -111,36 +104,6 @@ if (themeToggle) {
   });
 }
 
-if (enableAxiomButton) {
-  enableAxiomButton.addEventListener('click', () => {
-    if (enableAxiomButton.disabled) {
-      return;
-    }
-    enableAxiomButton.disabled = true;
-    if (permissionMessage) {
-      permissionMessage.textContent = 'Requesting access to axiom.trade…';
-    }
-    safeSendMessage({ type: 'REQUEST_AXIOM_ACCESS' }, (response, error) => {
-      enableAxiomButton.disabled = false;
-      if (error) {
-        if (permissionMessage) {
-          permissionMessage.textContent = 'Could not request permission. Please try again.';
-        }
-        return;
-      }
-      if (response && response.granted) {
-        if (permissionMessage) {
-          permissionMessage.textContent = 'Access granted. Open axiom.trade to start detecting.';
-        }
-        setPermissionState(true);
-        updateStats();
-      } else if (permissionMessage) {
-        permissionMessage.textContent = 'Permission was not granted. You can enable it anytime.';
-      }
-    });
-  });
-}
-
 resetDefaultsLink.addEventListener('click', () => {
   chrome.storage.sync.set({
     notificationsEnabled: true,
@@ -165,9 +128,6 @@ resetDefaultsLink.addEventListener('click', () => {
 
 function updateStats() {
   safeSendMessage({ type: 'GET_STATS' }, (response) => {
-    const permissionGranted = Boolean(response && response.hasPermission);
-    setPermissionState(permissionGranted);
-
     if (!response) {
       wsStatus.textContent = 'Offline';
       wsStatus.className = 'ws-status disconnected';
@@ -181,25 +141,15 @@ function updateStats() {
     const { wsConnected, tokensDetected: total, counts = {} } = response;
 
     tokensDetected.textContent = total || 0;
-    if (wsConnected) {
-      wsStatus.textContent = 'Connected';
-      wsStatus.className = 'ws-status connected';
-      if (wsStatusNote) {
-        wsStatusNote.textContent = '';
-        wsStatusNote.hidden = true;
-      }
-    } else {
-      wsStatus.textContent = 'Offline';
-      wsStatus.className = 'ws-status disconnected';
-      if (wsStatusNote) {
-        wsStatusNote.textContent = '';
-        wsStatusNote.hidden = true;
-      }
+    wsStatus.textContent = wsConnected ? 'Connected' : 'Offline';
+    wsStatus.className = wsConnected ? 'ws-status connected' : 'ws-status disconnected';
+    if (wsStatusNote) {
+      wsStatusNote.textContent = '';
+      wsStatusNote.hidden = true;
     }
 
-    if (permissionGranted) {
-      renderLaunchpadCounts(counts);
-    }
+    renderLaunchpadCounts(counts);
+    refreshDomainState();
   });
 }
 
@@ -214,63 +164,24 @@ function renderLaunchpadCounts(counts) {
   launchpadCountsList.textContent = parts.length ? parts.join('\n') : 'No launchpad data yet.';
 }
 
-function setPermissionState(granted) {
-  hasAxiomPermission = granted;
-  if (permissionNotice) {
-    permissionNotice.hidden = granted;
-  }
-  if (permissionMessage && !granted) {
-    permissionMessage.textContent = 'This extension needs access to axiom.trade to tag launchpad tokens.';
-  }
-
-  const controls = [notificationToggle, uxentoToggle, rapidToggle, uxentoColorInput, rapidColorInput];
-  controls.forEach((control) => {
-    if (control) {
-      control.disabled = !granted;
-    }
-  });
-
-  if (granted) {
-    refreshDomainState();
-  } else if (domainNotice) {
-    domainNotice.hidden = true;
-    launchpadCountsList.textContent = 'Grant axiom.trade permission to begin detection.';
-    tokensDetected.textContent = '0';
-    wsStatus.textContent = 'Offline';
-    wsStatus.className = 'ws-status disconnected';
-  }
-}
-
-function setDomainEnabled(isAxiom) {
-  if (!domainNotice) return;
-  if (!hasAxiomPermission) {
-    domainNotice.hidden = true;
-    return;
-  }
-  domainNotice.hidden = !!isAxiom;
-}
-
 function refreshDomainState() {
-  if (!hasAxiomPermission) {
-    setDomainEnabled(false);
-    return;
-  }
+  if (!domainNotice) return;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs && tabs[0];
-    let isAxiom = false;
+    let isSupportedSite = false;
     if (tab && tab.url) {
       try {
         const { hostname } = new URL(tab.url);
-        isAxiom = hostname === 'axiom.trade' || hostname.endsWith('.axiom.trade');
+        const isAxiom = hostname === 'axiom.trade' || hostname.endsWith('.axiom.trade');
+        const isGmgn = hostname === 'gmgn.ai' || hostname.endsWith('.gmgn.ai');
+        isSupportedSite = isAxiom || isGmgn;
       } catch (err) {
         // ignore
       }
     }
-    setDomainEnabled(isAxiom);
+    domainNotice.hidden = !!isSupportedSite;
   });
 }
 
-setPermissionState(false);
 updateStats();
-refreshDomainState();
 setInterval(updateStats, 4000);

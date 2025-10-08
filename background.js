@@ -1,13 +1,11 @@
 // Background service worker – connects to backend WebSocket and tags tokens
-const WS_ENDPOINT = 'wss://launchpaddetectorbackend-ytpfeg.fly.dev';
+const WS_ENDPOINT = 'wss://launchpaddetectorbackend-dev.fly.dev';
 const RECONNECT_DELAY_MS = 5000;
 const BADGE_IDLE = '●';
 const HEARTBEAT_INTERVAL_MS = 30000;
 const DEFAULT_UXENTO_COLOR = '#ff0000';
 const DEFAULT_RAPID_COLOR = '#1e88e5';
-const AXIOM_URL_FILTER = '*://axiom.trade/*';
-const AXIOM_ORIGINS = ['*://axiom.trade/*'];
-const CONTENT_SCRIPT_ID = 'axiom-detector-content';
+const SUPPORTED_SITES = ['*://axiom.trade/*', '*://gmgn.ai/*'];
 const TOKEN_CACHE_KEY = 'launchpadTokenCache';
 const TOKEN_CACHE_MAX = 300;
 
@@ -20,8 +18,7 @@ let uxentoColor = '#ff0000';
 let rapidEnabled = true;
 let rapidColor = DEFAULT_RAPID_COLOR;
 let heartbeatInterval = null;
-let axiomActive = false;
-let axiomPermissionGranted = false;
+let sitesActive = false;
 
 const seenMints = new Set();
 let tokensDetected = 0;
@@ -48,7 +45,7 @@ chrome.storage.sync.get([
   if (typeof result.rapidColor === 'string') {
     rapidColor = result.rapidColor;
   }
-  checkPermissionAndEvaluate();
+  evaluateSiteActivity();
 });
 
 loadCachedTokens();
@@ -81,37 +78,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-chrome.permissions.onAdded.addListener((permissions) => {
-  if (hasAxiomOrigin(permissions?.origins)) {
-    axiomPermissionGranted = true;
-    ensureContentScriptRegistered();
-    injectContentScriptIntoOpenTabs();
-    evaluateSiteActivity();
-  }
-});
-
-chrome.permissions.onRemoved.addListener((permissions) => {
-  if (hasAxiomOrigin(permissions?.origins)) {
-    axiomPermissionGranted = false;
-    ensureContentScriptRegistered();
-    axiomActive = false;
-    disconnect('axiom permission removed');
-    seenMints.clear();
-    tokenStyles.clear();
-    tokensDetected = 0;
-    resetLaunchpadCounts();
-    updateBadge();
-    chrome.storage.local.remove(TOKEN_CACHE_KEY);
-  }
-});
-
 chrome.tabs.onUpdated.addListener(handleTabEvent);
 chrome.tabs.onActivated.addListener(handleTabEvent);
 chrome.tabs.onRemoved.addListener(handleTabEvent);
 
 function connect() {
   clearTimeout(reconnectTimer);
-  if (!axiomPermissionGranted || !axiomActive) {
+  if (!sitesActive) {
     wsConnected = false;
     stopHeartbeat();
     chrome.action.setBadgeBackgroundColor({ color: '#f44336' });
@@ -166,7 +139,7 @@ function connect() {
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
   chrome.action.setBadgeBackgroundColor({ color: '#f44336' });
-  if (!axiomPermissionGranted || !axiomActive) {
+  if (!sitesActive) {
     return;
   }
   reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
@@ -175,8 +148,8 @@ function scheduleReconnect() {
 function disconnect(reason) {
   clearTimeout(reconnectTimer);
   stopHeartbeat();
+  wsConnected = false;
   if (!ws) {
-    wsConnected = false;
     return;
   }
   try {
@@ -186,11 +159,15 @@ function disconnect(reason) {
     console.debug('Error closing WebSocket:', err);
   }
   ws = null;
-  wsConnected = false;
   chrome.action.setBadgeBackgroundColor({ color: '#f44336' });
 }
 
 function handleMessage(raw) {
+  // Handle pong response
+  if (raw === 'pong') {
+    return;
+  }
+
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -265,18 +242,11 @@ function classifyLaunchpad(value) {
   return null;
 }
 
-function createNotification(name, mint, label) {
-  const notificationId = `launchpad-${mint}-${Date.now()}`;
-  const options = {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icon.png'),
-    title: `${label} token detected`,
-    message: `${name}\nMint: ${mint.slice(0, 8)}...`,
-    priority: 2
-  };
-
+function emitNotification(notificationId, options, logData = null) {
   const emit = () => {
-    console.log('[notification]', label, name, mint);
+    if (logData) {
+      console.log('[notification]', ...logData);
+    }
     chrome.notifications.create(notificationId, options, () => {
       const err = chrome.runtime.lastError;
       if (err) {
@@ -299,6 +269,18 @@ function createNotification(name, mint, label) {
   }
 }
 
+function createNotification(name, mint, label) {
+  const notificationId = `launchpad-${mint}-${Date.now()}`;
+  const options = {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icon.png'),
+    title: `${label} token detected`,
+    message: `${name}\nMint: ${mint.slice(0, 8)}...`,
+    priority: 2
+  };
+  emitNotification(notificationId, options, [label, name, mint]);
+}
+
 function notifyStatus(title, message) {
   const notificationId = `status-${Date.now()}`;
   const options = {
@@ -308,35 +290,11 @@ function notifyStatus(title, message) {
     message,
     priority: 0
   };
-
-  const emit = () => {
-    chrome.notifications.create(notificationId, options, () => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        console.debug('Notification error:', err.message);
-      }
-    });
-    autoClearNotification(notificationId);
-  };
-
-  if (typeof chrome.notifications.getPermissionLevel === 'function') {
-    chrome.notifications.getPermissionLevel((level) => {
-      if (level === 'granted') {
-        emit();
-      } else {
-        console.warn('Status notification suppressed - permission level:', level);
-      }
-    });
-  } else {
-    emit();
-  }
+  emitNotification(notificationId, options);
 }
 
 function broadcastToContent(message) {
-  if (!axiomPermissionGranted) {
-    return;
-  }
-  chrome.tabs.query({ url: '*://axiom.trade/*' }, (tabs) => {
+  chrome.tabs.query({ url: SUPPORTED_SITES }, (tabs) => {
     tabs.forEach((tab) => {
       if (!tab || typeof tab.id !== 'number') return;
       chrome.tabs.sendMessage(tab.id, message, () => {
@@ -362,12 +320,16 @@ function startHeartbeat() {
   stopHeartbeat();
   heartbeatInterval = setInterval(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
+      stopHeartbeat();
+      scheduleReconnect();
       return;
     }
     try {
       ws.send('ping');
     } catch (err) {
       console.debug('Heartbeat send failed:', err);
+      stopHeartbeat();
+      scheduleReconnect();
     }
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -390,8 +352,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         uxento: launchpadCounts.uxento,
         rapid: launchpadCounts.rapid,
         other: launchpadCounts.other
-      },
-      hasPermission: axiomPermissionGranted
+      }
     });
     return true;
   }
@@ -429,28 +390,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === 'REQUEST_AXIOM_ACCESS') {
-    chrome.permissions.request({ origins: AXIOM_ORIGINS }, (granted) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        console.debug('Permission request error:', err.message);
-      }
-      if (granted) {
-        axiomPermissionGranted = true;
-        ensureContentScriptRegistered();
-        injectContentScriptIntoOpenTabs();
-        evaluateSiteActivity();
-      }
-      sendResponse({ granted: Boolean(granted) });
-    });
-    return true;
-  }
-
   if (request.type === 'REQUEST_TOKENS') {
-    if (!axiomPermissionGranted) {
-      sendResponse({ tokens: [] });
-      return true;
-    }
     const tokens = [];
     tokenStyles.forEach((metadata, mint) => {
       if (!metadata || !metadata.launchpad) {
@@ -474,38 +414,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 chrome.action.setBadgeBackgroundColor({ color: '#f44336' });
 chrome.action.setBadgeText({ text: BADGE_IDLE });
-checkPermissionAndEvaluate();
+evaluateSiteActivity();
+
+const LAUNCHPAD_CONFIG = {
+  UXENTO: {
+    getEnabled: () => uxentoEnabled,
+    getColor: () => uxentoColor || DEFAULT_UXENTO_COLOR,
+    countKey: 'uxento'
+  },
+  RAPIDLAUNCH: {
+    getEnabled: () => rapidEnabled,
+    getColor: () => rapidColor || DEFAULT_RAPID_COLOR,
+    countKey: 'rapid'
+  }
+};
 
 function isLaunchpadEnabled(key) {
-  if (key === 'UXENTO') {
-    return uxentoEnabled;
-  }
-  if (key === 'RAPIDLAUNCH') {
-    return rapidEnabled;
-  }
-  return false;
+  return LAUNCHPAD_CONFIG[key]?.getEnabled() || false;
 }
 
 function getLaunchpadColor(key) {
-  if (key === 'UXENTO') {
-    return uxentoColor || DEFAULT_UXENTO_COLOR;
-  }
-  if (key === 'RAPIDLAUNCH') {
-    return rapidColor || DEFAULT_RAPID_COLOR;
-  }
-  return DEFAULT_UXENTO_COLOR;
+  return LAUNCHPAD_CONFIG[key]?.getColor() || DEFAULT_UXENTO_COLOR;
 }
 
 function incrementLaunchpadCount(key) {
-  if (key === 'UXENTO') {
-    launchpadCounts.uxento += 1;
-    return;
+  const config = LAUNCHPAD_CONFIG[key];
+  if (config) {
+    launchpadCounts[config.countKey] += 1;
+  } else {
+    launchpadCounts.other += 1;
   }
-  if (key === 'RAPIDLAUNCH') {
-    launchpadCounts.rapid += 1;
-    return;
-  }
-  launchpadCounts.other += 1;
 }
 
 function resetLaunchpadCounts() {
@@ -519,24 +457,16 @@ function handleTabEvent() {
 }
 
 function evaluateSiteActivity() {
-  if (!axiomPermissionGranted) {
-    axiomActive = false;
-    disconnect('axiom permission missing');
-    return;
-  }
-  chrome.tabs.query({ url: AXIOM_URL_FILTER }, (tabs) => {
-    const hasAxiom = Array.isArray(tabs) && tabs.length > 0;
-    if (hasAxiom === axiomActive) {
-      if (!hasAxiom) {
-        disconnect('axiom closed');
-      }
+  chrome.tabs.query({ url: SUPPORTED_SITES }, (tabs) => {
+    const hasSites = Array.isArray(tabs) && tabs.length > 0;
+    if (hasSites === sitesActive) {
       return;
     }
-    axiomActive = hasAxiom;
-    if (axiomActive) {
+    sitesActive = hasSites;
+    if (sitesActive) {
       connect();
     } else {
-      disconnect('axiom closed');
+      disconnect('sites closed');
     }
   });
 }
@@ -554,100 +484,6 @@ function autoClearNotification(notificationId) {
       console.debug('Notification clear threw error:', err);
     }
   }, 10000);
-}
-
-function checkPermissionAndEvaluate() {
-  chrome.permissions.contains({ origins: AXIOM_ORIGINS }, (granted) => {
-    const err = chrome.runtime.lastError;
-    if (err) {
-      console.debug('Permission contains error:', err.message);
-    }
-    axiomPermissionGranted = Boolean(granted);
-    ensureContentScriptRegistered();
-    if (axiomPermissionGranted) {
-      injectContentScriptIntoOpenTabs();
-    }
-    evaluateSiteActivity();
-  });
-}
-
-function ensureContentScriptRegistered() {
-  if (!chrome.scripting?.getRegisteredContentScripts) {
-    return;
-  }
-  chrome.scripting.getRegisteredContentScripts({ ids: [CONTENT_SCRIPT_ID] }, (scripts) => {
-    const err = chrome.runtime.lastError;
-    if (err) {
-      console.debug('getRegisteredContentScripts error:', err.message);
-    }
-    const alreadyRegistered = Array.isArray(scripts) && scripts.length > 0;
-
-    if (axiomPermissionGranted && !alreadyRegistered) {
-      chrome.scripting.registerContentScripts([
-        {
-          id: CONTENT_SCRIPT_ID,
-          js: ['content.js'],
-          matches: AXIOM_ORIGINS,
-          runAt: 'document_idle',
-          persistAcrossSessions: true
-        }
-      ], () => {
-        const regErr = chrome.runtime.lastError;
-        if (regErr) {
-          console.debug('registerContentScripts error:', regErr.message);
-        }
-      });
-    } else if (!axiomPermissionGranted && alreadyRegistered) {
-      chrome.scripting.unregisterContentScripts({ ids: [CONTENT_SCRIPT_ID] }, () => {
-        const unregErr = chrome.runtime.lastError;
-        if (unregErr && !/not found/i.test(unregErr.message || '')) {
-          console.debug('unregisterContentScripts error:', unregErr.message);
-        }
-      });
-    }
-  });
-}
-
-function injectContentScriptIntoOpenTabs() {
-  if (!axiomPermissionGranted || !chrome.scripting?.executeScript) {
-    return;
-  }
-  chrome.tabs.query({ url: AXIOM_URL_FILTER }, (tabs) => {
-    if (!Array.isArray(tabs)) {
-      return;
-    }
-    tabs.forEach((tab) => {
-      if (!tab || typeof tab.id !== 'number') {
-        return;
-      }
-      chrome.scripting.executeScript(
-        {
-          target: { tabId: tab.id, allFrames: false },
-          files: ['content.js']
-        },
-        () => {
-          const err = chrome.runtime.lastError;
-          if (err && !/Cannot access contents of the page|Frame with id/i.test(err.message || '')) {
-            console.debug('executeScript error:', err.message);
-          }
-        }
-      );
-    });
-  });
-}
-
-function hasAxiomOrigin(origins) {
-  if (!Array.isArray(origins)) {
-    return false;
-  }
-  return origins.some((origin) => originMatchesAxiom(origin));
-}
-
-function originMatchesAxiom(origin) {
-  if (typeof origin !== 'string') {
-    return false;
-  }
-  return AXIOM_ORIGINS.includes(origin);
 }
 
 function loadCachedTokens() {

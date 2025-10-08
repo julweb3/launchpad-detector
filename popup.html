@@ -264,28 +264,6 @@
     body.light .theme-toggle img {
       filter: none;
     }
-
-    .permission-actions {
-      margin-top: 8px;
-      display: flex;
-      justify-content: flex-start;
-    }
-
-    .primary-button {
-      border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      background: #6573ff;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    }
-
-    .primary-button:hover {
-      background: #5564e6;
-    }
   </style>
 </head>
 <body class="dark">
@@ -301,14 +279,7 @@
     </div>
 
     <div id="domainNotice" class="domain-notice" hidden>
-      Open axiom.trade to view detections.
-    </div>
-
-    <div id="permissionNotice" class="domain-notice" hidden>
-      <div id="permissionMessage">This extension needs access to axiom.trade to tag launchpad tokens.</div>
-      <div class="permission-actions">
-        <button id="enableAxiomAccess" class="primary-button">Enable axiom.trade</button>
-      </div>
+      Open axiom.trade or gmgn.ai to view detections.
     </div>
 
     <div class="section">
@@ -368,8 +339,9 @@
       <div class="ws-status-note" id="wsStatusNote" hidden></div>
     </div>
 
-    <div class="footer-actions">
+    <div class="footer-actions" style="display: flex; justify-content: space-between;">
       <span id="resetDefaults" class="reset-link">Reset defaults</span>
+      <span id="credits"><img src="https://upload.wikimedia.org/wikipedia/commons/5/57/X_logo_2023_%28white%29.png" width="10px" height="10px" style="margin-bottom: -1px;" alt="x"><a target="_blank" rel="noopener noreferrer" style="color: #7c8cff;" href="https://x.com/jul_web3">julweb3</a></span>
     </div>
   </div>
 
